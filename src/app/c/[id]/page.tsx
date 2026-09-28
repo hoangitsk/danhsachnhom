@@ -511,9 +511,9 @@ export default function StudentSelectionPage({ params }: { params: Promise<{ id:
                   setShowProfileModal(true);
                 }}
                 className="bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold px-3 py-2 rounded-xl transition flex items-center gap-1 shadow-sm"
-                title="Cập nhật thông tin liên lạc / SĐT / Zalo / Kỹ năng"
+                title="Cập nhật SĐT / Thông tin liên lạc (Không bắt buộc)"
               >
-                <Edit3 className="w-3.5 h-3.5" /> Sửa Bio / Zalo
+                <Edit3 className="w-3.5 h-3.5" /> SĐT / Bio (Tùy chọn)
               </button>
             </div>
           ) : (
@@ -533,7 +533,7 @@ export default function StudentSelectionPage({ params }: { params: Promise<{ id:
               <div className="flex justify-between items-center">
                 <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
                   <Edit3 className="w-5 h-5 text-amber-600" />
-                  Cập Nhật Thông Tin Cá Nhân / Liên Lạc
+                  Cập Nhật SĐT / Liên Lạc
                 </h3>
                 <button
                   onClick={() => setShowProfileModal(false)}
@@ -544,7 +544,7 @@ export default function StudentSelectionPage({ params }: { params: Promise<{ id:
               </div>
 
               <p className="text-xs text-slate-600">
-                Thêm SĐT, Zalo hoặc mô tả kỹ năng của bạn để các bạn khác hoặc Nhóm trưởng tiện liên lạc & chọn bạn vào nhóm:
+                Bạn có thể thêm Số điện thoại, Zalo hoặc kỹ năng <strong className="text-slate-800">(không bắt buộc)</strong> để các bạn khác hoặc Nhóm trưởng tiện liên lạc:
               </p>
 
               {profileError && (
@@ -555,18 +555,19 @@ export default function StudentSelectionPage({ params }: { params: Promise<{ id:
               )}
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Thông tin liên lạc & Kỹ năng / Ghi chú
+                <label className="block text-xs font-bold text-slate-700 mb-1 flex justify-between">
+                  <span>Số điện thoại / Zalo / Bio kỹ năng</span>
+                  <span className="font-normal text-slate-400 italic">Không bắt buộc</span>
                 </label>
                 <input
                   type="text"
-                  placeholder="VD: Zalo: 0912345678 - Làm slide, mẫn cán"
+                  placeholder="VD: SĐT: 0912345678 - Zalo / Slide"
                   value={profileContactInput}
                   onChange={(e) => setProfileContactInput(e.target.value)}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-amber-500"
                   autoFocus
                 />
-                <p className="text-[11px] text-slate-400 mt-1">Thông tin này sẽ hiển thị cạnh tên bạn cho cả lớp cùng thấy.</p>
+                <p className="text-[11px] text-slate-400 mt-1">Thông tin này là tùy chọn (không bắt buộc). Nếu điền sẽ hiển thị cạnh tên bạn cho các bạn khác dễ liên lạc.</p>
               </div>
 
               {currentStudent.dob && (
