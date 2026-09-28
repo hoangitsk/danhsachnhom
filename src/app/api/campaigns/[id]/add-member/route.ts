@@ -90,6 +90,7 @@ export async function POST(
       .update({
         group_id: targetGroupId,
         joined_at: new Date().toISOString(),
+        approval_status: 'APPROVED',
       })
       .in('id', studentIdsToUpdate);
 
