@@ -2,7 +2,8 @@
 
 import { useState, useMemo, ChangeEvent } from 'react';
 import { parseStudentListText, parseExcelFile, calculateGroupCount, ParsedStudent } from '@/lib/campaign-utils';
-import { Users, Sparkles, Copy, Check, ShieldCheck, UserCheck, ArrowRight, FileSpreadsheet, Upload } from 'lucide-react';
+import { Users, Sparkles, Copy, Check, ShieldCheck, UserCheck, ArrowRight, FileSpreadsheet, Upload, Layers } from 'lucide-react';
+import Link from 'next/link';
 
 export default function HomePage() {
   const [title, setTitle] = useState('');
@@ -25,7 +26,6 @@ export default function HomePage() {
   const [copiedStudentLink, setCopiedStudentLink] = useState(false);
   const [copiedAdminLink, setCopiedAdminLink] = useState(false);
 
-  // Parse text nếu đang ở chế độ text
   const parsedFromText = useMemo(() => {
     return parseStudentListText(rawStudentText);
   }, [rawStudentText]);
@@ -38,7 +38,6 @@ export default function HomePage() {
     return calculateGroupCount(activeStudentsList.length, maxPerGroup);
   }, [activeStudentsList.length, maxPerGroup]);
 
-  // Xử lý khi chọn file Excel / CSV
   const handleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -137,11 +136,22 @@ export default function HomePage() {
 
   return (
     <main className="max-w-4xl mx-auto px-4 py-10">
-      {/* Header */}
-      <div className="text-center mb-10">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-100 text-blue-700 text-sm font-semibold mb-3">
-          <Sparkles className="w-4 h-4" /> Ứng dụng Chọn Nhóm Thông Minh
+      {/* Top Header Link */}
+      <div className="flex justify-between items-center mb-6">
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-100 text-blue-700 text-xs font-semibold">
+          <Sparkles className="w-3.5 h-3.5" /> Ứng dụng Chọn Nhóm Thông Minh
         </div>
+
+        <Link
+          href="/campaigns"
+          className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 hover:text-blue-600 bg-white border border-slate-200 px-3.5 py-2 rounded-xl shadow-sm transition"
+        >
+          <Layers className="w-4 h-4 text-blue-600" /> Xem Tất Cả Các Đợt Đã Tạo
+        </Link>
+      </div>
+
+      {/* Header Title */}
+      <div className="text-center mb-10">
         <h1 className="text-4xl font-extrabold tracking-tight text-slate-900 sm:text-5xl">
           Tạo Đợt Chọn Nhóm Mới
         </h1>
@@ -317,7 +327,7 @@ export default function HomePage() {
                 <div>
                   <p className="text-sm font-bold text-slate-800">Tải file danh sách sinh viên (.xlsx, .xls, .csv)</p>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Hỗ trợ tự nhận diện các cột MSSV, Họ và Tên, và Ngày sinh (nếu có).
+                    Hỗ trợ tự nhận diện các cột MSSV, Họ lót, Tên và Ngày sinh.
                   </p>
                 </div>
 
