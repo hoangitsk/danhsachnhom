@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, use, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Users, UserCheck, LogOut, CheckCircle2, Lock, RefreshCw, Search, ShieldAlert, KeyRound, UserPlus, Check, X, AlertCircle, Sparkles, ClipboardList } from 'lucide-react';
+import { Users, UserCheck, LogOut, CheckCircle2, Lock, RefreshCw, Search, ShieldAlert, KeyRound, UserPlus, Check, X, AlertCircle, Sparkles, ClipboardList, Crown } from 'lucide-react';
 
 interface Campaign {
   id: string;
@@ -17,6 +17,7 @@ interface Group {
   campaign_id: string;
   group_number: number;
   custom_name: string | null;
+  leader_mssv?: string | null;
 }
 
 interface Student {
@@ -60,6 +61,10 @@ export default function StudentSelectionPage({ params }: { params: Promise<{ id:
   const [addMemberTab, setAddMemberTab] = useState<'search' | 'paste'>('search');
   const [addMemberSearchQuery, setAddMemberSearchQuery] = useState('');
   const [addMemberPasteText, setAddMemberPasteText] = useState('');
+
+  // Modal Đổi Nhóm Trưởng
+  const [changeLeaderTargetGroup, setChangeLeaderTargetGroup] = useState<Group | null>(null);
+  const [selectedNewLeaderMssv, setSelectedNewLeaderMssv] = useState<string>('');
 
   const fetchData = useCallback(async () => {
     try {
@@ -120,6 +125,18 @@ export default function StudentSelectionPage({ params }: { params: Promise<{ id:
           event: '*',
           schema: 'public',
           table: 'students',
+          filter: `campaign_id=eq.${campaignId}`,
+        },
+        () => {
+          fetchData();
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'groups',
           filter: `campaign_id=eq.${campaignId}`,
         },
         () => {
@@ -246,7 +263,36 @@ export default function StudentSelectionPage({ params }: { params: Promise<{ id:
     setDobError(null);
   };
 
-  // Nhóm trưởng / Thành viên thêm sinh viên lẻ vào nhóm mình
+  // Thao tác Đổi Nhóm Trưởng
+  const handleChangeLeader = async () => {
+    if (!changeLeaderTargetGroup || !selectedNewLeaderMssv || !currentMssv) return;
+
+    setActionLoading(true);
+    try {
+      const res = await fetch(`/api/campaigns/${campaignId}/change-leader`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          groupId: changeLeaderTargetGroup.id,
+          newLeaderMssv: selectedNewLeaderMssv,
+          requesterMssv: currentMssv,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Đổi nhóm trưởng thất bại');
+
+      setChangeLeaderTargetGroup(null);
+      setSelectedNewLeaderMssv('');
+      await fetchData();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Lỗi khi đổi nhóm trưởng');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Thêm sinh viên chưa có nhóm
   const handleAddMembersToMyGroup = async (mssvsToAdd: string[]) => {
     if (!addMemberTargetGroup || mssvsToAdd.length === 0) return;
 
@@ -281,7 +327,6 @@ export default function StudentSelectionPage({ params }: { params: Promise<{ id:
 
   const assignedStudentsCount = students.filter((s) => s.group_id).length;
 
-  // Lọc sinh viên chưa có nhóm theo ô tìm kiếm
   const searchedUnassignedStudents = useMemo(() => {
     if (!addMemberSearchQuery.trim()) return unassignedStudentsList;
     const q = addMemberSearchQuery.toLowerCase().trim();
@@ -290,7 +335,6 @@ export default function StudentSelectionPage({ params }: { params: Promise<{ id:
     );
   }, [unassignedStudentsList, addMemberSearchQuery]);
 
-  // Tự động nhận diện danh sách sinh viên dán trong Textarea
   const parsedPastedStudents = useMemo(() => {
     if (!addMemberPasteText.trim()) return [];
     const rawTokens = addMemberPasteText
@@ -468,7 +512,87 @@ export default function StudentSelectionPage({ params }: { params: Promise<{ id:
           </div>
         )}
 
-        {/* Modal Nâng Cấp: Thêm Thành Viên Chưa Có Nhóm (Gõ Tìm Kiếm hoặc Dán MSSV/Tên) */}
+        {/* Modal Đổi Nhóm Trưởng */}
+        {changeLeaderTargetGroup && (
+          <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl p-6 max-w-md w-full space-y-4 shadow-xl border border-slate-200">
+              <div className="flex justify-between items-center">
+                <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                  <Crown className="w-5 h-5 text-amber-500" />
+                  Đổi Nhóm Trưởng cho {changeLeaderTargetGroup.custom_name || `Nhóm ${changeLeaderTargetGroup.group_number}`}
+                </h3>
+                <button
+                  onClick={() => setChangeLeaderTargetGroup(null)}
+                  className="text-slate-400 hover:text-slate-600 p-1"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-600">
+                Bạn đang là thành viên của nhóm này. Vui lòng chọn một thành viên trong nhóm để chỉ định làm <strong>Nhóm trưởng mới</strong>:
+              </p>
+
+              <div className="space-y-2 max-h-56 overflow-y-auto">
+                {students
+                  .filter((s) => s.group_id === changeLeaderTargetGroup.id)
+                  .map((m) => {
+                    const isLeader =
+                      changeLeaderTargetGroup.leader_mssv === m.mssv ||
+                      (!changeLeaderTargetGroup.leader_mssv &&
+                        students.filter((s) => s.group_id === changeLeaderTargetGroup.id)[0]?.mssv === m.mssv);
+
+                    return (
+                      <label
+                        key={m.id}
+                        className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer transition text-xs ${
+                          selectedNewLeaderMssv === m.mssv
+                            ? 'border-amber-500 bg-amber-50/60 ring-2 ring-amber-100 font-bold'
+                            : 'border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="radio"
+                            name="new_leader"
+                            value={m.mssv}
+                            checked={selectedNewLeaderMssv === m.mssv}
+                            onChange={() => setSelectedNewLeaderMssv(m.mssv)}
+                            className="text-amber-600 focus:ring-amber-500"
+                          />
+                          <span>{m.full_name}</span>
+                          <span className="font-mono text-[11px] text-slate-500">({m.mssv})</span>
+                        </div>
+                        {isLeader && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full">
+                            <Crown className="w-3 h-3 text-amber-600" /> Trưởng hiện tại
+                          </span>
+                        )}
+                      </label>
+                    );
+                  })}
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  onClick={() => setChangeLeaderTargetGroup(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100"
+                >
+                  Hủy
+                </button>
+                <button
+                  onClick={handleChangeLeader}
+                  disabled={actionLoading || !selectedNewLeaderMssv}
+                  className="px-5 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white disabled:opacity-50 shadow-sm flex items-center gap-1.5"
+                >
+                  <Crown className="w-3.5 h-3.5" /> Xác Nhận Đổi Nhóm Trưởng
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal Thêm Bạn Chưa Có Nhóm */}
         {addMemberTargetGroup && (
           <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl p-6 max-w-lg w-full space-y-4 shadow-xl border border-slate-200">
@@ -485,7 +609,6 @@ export default function StudentSelectionPage({ params }: { params: Promise<{ id:
                 </button>
               </div>
 
-              {/* Toggle Chế độ: Gõ tìm kiếm vs Dán Text */}
               <div className="flex rounded-xl bg-slate-100 p-1 text-xs">
                 <button
                   type="button"
@@ -507,7 +630,6 @@ export default function StudentSelectionPage({ params }: { params: Promise<{ id:
                 </button>
               </div>
 
-              {/* MODE 1: Gõ Tìm kiếm MSSV / Họ tên */}
               {addMemberTab === 'search' && (
                 <div className="space-y-3">
                   <div className="relative">
@@ -551,7 +673,6 @@ export default function StudentSelectionPage({ params }: { params: Promise<{ id:
                 </div>
               )}
 
-              {/* MODE 2: Dán MSSV / Họ tên Hàng loạt */}
               {addMemberTab === 'paste' && (
                 <div className="space-y-3">
                   <p className="text-xs text-slate-500">
@@ -565,7 +686,6 @@ export default function StudentSelectionPage({ params }: { params: Promise<{ id:
                     className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs font-mono focus:ring-2 focus:ring-emerald-500"
                   />
 
-                  {/* Nhận diện được */}
                   {parsedPastedStudents.length > 0 && (
                     <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs space-y-1">
                       <p className="font-bold text-emerald-800 flex items-center gap-1">
@@ -645,7 +765,7 @@ export default function StudentSelectionPage({ params }: { params: Promise<{ id:
           </div>
         )}
 
-        {/* Thanh Chuyển Tab: Thẻ Nhóm vs Danh Sách Tổng */}
+        {/* Thanh Chuyển Tab */}
         <div className="flex border-b border-slate-200 justify-between items-center">
           <div className="flex gap-2">
             <button
@@ -737,45 +857,69 @@ export default function StudentSelectionPage({ params }: { params: Promise<{ id:
                     <div className="flex justify-between items-center">
                       <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Thành viên:</p>
 
-                      {/* Nút Thêm người chưa có nhóm */}
-                      {isMyGroup && !isFull && campaign.status === 'OPEN' && unassignedStudentsList.length > 0 && (
-                        <button
-                          onClick={() => {
-                            setAddMemberTargetGroup(group.id);
-                            setAddMemberSearchQuery('');
-                            setAddMemberPasteText('');
-                          }}
-                          className="text-[11px] font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2 py-1 rounded-lg transition inline-flex items-center gap-1"
-                        >
-                          <UserPlus className="w-3 h-3" /> + Thêm bạn lẻ
-                        </button>
-                      )}
+                      <div className="flex gap-1.5">
+                        {/* Nút Đổi Nhóm Trưởng (cho Thành viên trong nhóm) */}
+                        {isMyGroup && memberCount > 0 && campaign.status === 'OPEN' && (
+                          <button
+                            onClick={() => {
+                              setChangeLeaderTargetGroup(group);
+                              const currentLeader =
+                                group.leader_mssv || groupMembers[0]?.mssv || '';
+                              setSelectedNewLeaderMssv(currentLeader);
+                            }}
+                            className="text-[11px] font-bold text-amber-800 hover:text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2 py-1 rounded-lg transition inline-flex items-center gap-1"
+                            title="Đổi Nhóm Trưởng"
+                          >
+                            <Crown className="w-3 h-3 text-amber-600" /> Đổi Trưởng
+                          </button>
+                        )}
+
+                        {/* Nút Thêm người chưa có nhóm */}
+                        {isMyGroup && !isFull && campaign.status === 'OPEN' && unassignedStudentsList.length > 0 && (
+                          <button
+                            onClick={() => {
+                              setAddMemberTargetGroup(group.id);
+                              setAddMemberSearchQuery('');
+                              setAddMemberPasteText('');
+                            }}
+                            className="text-[11px] font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2 py-1 rounded-lg transition inline-flex items-center gap-1"
+                          >
+                            <UserPlus className="w-3 h-3" /> + Thêm bạn
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     {groupMembers.length === 0 ? (
                       <p className="text-xs text-slate-400 italic py-2">Chưa có ai tham gia nhóm này.</p>
                     ) : (
                       <ul className="space-y-2">
-                        {groupMembers.map((m, idx) => (
-                          <li
-                            key={m.id}
-                            className={`text-xs p-2 rounded-lg flex justify-between items-center ${
-                              m.mssv === currentMssv
-                                ? 'bg-blue-50 text-blue-900 font-bold border border-blue-200'
-                                : 'bg-slate-50 text-slate-700'
-                            }`}
-                          >
-                            <span className="flex items-center gap-1.5">
-                              {idx === 0 && (
-                                <span className="text-[10px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded">
-                                  Nhóm trưởng
-                                </span>
-                              )}
-                              {m.full_name}
-                            </span>
-                            <span className="font-mono text-[11px] text-slate-500">{m.mssv}</span>
-                          </li>
-                        ))}
+                        {groupMembers.map((m, idx) => {
+                          const isLeader =
+                            group.leader_mssv === m.mssv ||
+                            (!group.leader_mssv && idx === 0);
+
+                          return (
+                            <li
+                              key={m.id}
+                              className={`text-xs p-2 rounded-lg flex justify-between items-center ${
+                                m.mssv === currentMssv
+                                  ? 'bg-blue-50 text-blue-900 font-bold border border-blue-200'
+                                  : 'bg-slate-50 text-slate-700'
+                              }`}
+                            >
+                              <span className="flex items-center gap-1.5">
+                                {isLeader && (
+                                  <span className="inline-flex items-center gap-1 text-[10px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded border border-amber-200">
+                                    <Crown className="w-3 h-3 text-amber-600" /> Nhóm trưởng
+                                  </span>
+                                )}
+                                {m.full_name}
+                              </span>
+                              <span className="font-mono text-[11px] text-slate-500">{m.mssv}</span>
+                            </li>
+                          );
+                        })}
                       </ul>
                     )}
                   </div>
