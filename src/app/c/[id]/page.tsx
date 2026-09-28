@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback, use } from 'react';
+import { useState, useEffect, useCallback, use, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Users, UserCheck, LogOut, CheckCircle2, Lock, RefreshCw, Search, ShieldAlert, KeyRound, UserPlus, Check, X, AlertCircle } from 'lucide-react';
+import { Users, UserCheck, LogOut, CheckCircle2, Lock, RefreshCw, Search, ShieldAlert, KeyRound, UserPlus, Check, X, AlertCircle, Sparkles, ClipboardList } from 'lucide-react';
 
 interface Campaign {
   id: string;
@@ -57,7 +57,9 @@ export default function StudentSelectionPage({ params }: { params: Promise<{ id:
 
   // Modal Thêm bạn vào nhóm (cho Nhóm trưởng / Thành viên)
   const [addMemberTargetGroup, setAddMemberTargetGroup] = useState<string | null>(null);
-  const [selectedUnassignedMssv, setSelectedUnassignedMssv] = useState<string>('');
+  const [addMemberTab, setAddMemberTab] = useState<'search' | 'paste'>('search');
+  const [addMemberSearchQuery, setAddMemberSearchQuery] = useState('');
+  const [addMemberPasteText, setAddMemberPasteText] = useState('');
 
   const fetchData = useCallback(async () => {
     try {
@@ -228,11 +230,9 @@ export default function StudentSelectionPage({ params }: { params: Promise<{ id:
       return;
     }
 
-    // Lần đầu chọn nhóm (chưa có nhóm nào): Không cần mật khẩu!
     if (!currentStudent?.group_id) {
       executeJoinGroup(targetGroupId);
     } else {
-      // Đang đổi nhóm: Hiện Modal nhập Mật khẩu Ngày Sinh
       setDobModalInfo({ action: 'join', groupId: targetGroupId });
       setDobInput('');
       setDobError(null);
@@ -246,9 +246,9 @@ export default function StudentSelectionPage({ params }: { params: Promise<{ id:
     setDobError(null);
   };
 
-  // Nhóm trưởng / Thành viên thêm sinh viên chưa có nhóm vào nhóm mình
-  const handleAddMemberToMyGroup = async () => {
-    if (!addMemberTargetGroup || !selectedUnassignedMssv) return;
+  // Nhóm trưởng / Thành viên thêm sinh viên lẻ vào nhóm mình
+  const handleAddMembersToMyGroup = async (mssvsToAdd: string[]) => {
+    if (!addMemberTargetGroup || mssvsToAdd.length === 0) return;
 
     setActionLoading(true);
     try {
@@ -256,7 +256,7 @@ export default function StudentSelectionPage({ params }: { params: Promise<{ id:
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          targetMssv: selectedUnassignedMssv,
+          mssvList: mssvsToAdd,
           targetGroupId: addMemberTargetGroup,
         }),
       });
@@ -265,7 +265,8 @@ export default function StudentSelectionPage({ params }: { params: Promise<{ id:
       if (!res.ok) throw new Error(data.error || 'Thêm thành viên thất bại');
 
       setAddMemberTargetGroup(null);
-      setSelectedUnassignedMssv('');
+      setAddMemberSearchQuery('');
+      setAddMemberPasteText('');
       await fetchData();
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Lỗi khi thêm thành viên');
@@ -274,8 +275,47 @@ export default function StudentSelectionPage({ params }: { params: Promise<{ id:
     }
   };
 
-  const unassignedStudentsList = students.filter((s) => !s.group_id);
+  const unassignedStudentsList = useMemo(() => {
+    return students.filter((s) => !s.group_id);
+  }, [students]);
+
   const assignedStudentsCount = students.filter((s) => s.group_id).length;
+
+  // Lọc sinh viên chưa có nhóm theo ô tìm kiếm
+  const searchedUnassignedStudents = useMemo(() => {
+    if (!addMemberSearchQuery.trim()) return unassignedStudentsList;
+    const q = addMemberSearchQuery.toLowerCase().trim();
+    return unassignedStudentsList.filter(
+      (s) => s.mssv.toLowerCase().includes(q) || s.full_name.toLowerCase().includes(q)
+    );
+  }, [unassignedStudentsList, addMemberSearchQuery]);
+
+  // Tự động nhận diện danh sách sinh viên dán trong Textarea
+  const parsedPastedStudents = useMemo(() => {
+    if (!addMemberPasteText.trim()) return [];
+    const rawTokens = addMemberPasteText
+      .split(/[\n,;\t]+/)
+      .map((t) => t.trim())
+      .filter(Boolean);
+
+    const matched: Student[] = [];
+    const matchedMssvs = new Set<string>();
+
+    for (const token of rawTokens) {
+      const q = token.toLowerCase();
+      const found = unassignedStudentsList.find(
+        (s) =>
+          !matchedMssvs.has(s.mssv) &&
+          (s.mssv.toLowerCase().includes(q) || s.full_name.toLowerCase().includes(q))
+      );
+      if (found) {
+        matchedMssvs.add(found.mssv);
+        matched.push(found);
+      }
+    }
+
+    return matched;
+  }, [addMemberPasteText, unassignedStudentsList]);
 
   const filteredMasterList = students.filter((s) => {
     const matchesSearch =
@@ -428,14 +468,14 @@ export default function StudentSelectionPage({ params }: { params: Promise<{ id:
           </div>
         )}
 
-        {/* Modal Thêm Bạn Chưa Có Nhóm Vượt Cấp (Dành cho Nhóm trưởng / Thành viên nhóm) */}
+        {/* Modal Nâng Cấp: Thêm Thành Viên Chưa Có Nhóm (Gõ Tìm Kiếm hoặc Dán MSSV/Tên) */}
         {addMemberTargetGroup && (
           <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl p-6 max-w-md w-full space-y-4 shadow-xl border border-slate-200">
+            <div className="bg-white rounded-2xl p-6 max-w-lg w-full space-y-4 shadow-xl border border-slate-200">
               <div className="flex justify-between items-center">
                 <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
                   <UserPlus className="w-5 h-5 text-emerald-600" />
-                  Thêm Bạn Chưa Có Nhóm Vực Vào Nhóm
+                  Thêm Bạn Vào Nhóm
                 </h3>
                 <button
                   onClick={() => setAddMemberTargetGroup(null)}
@@ -445,43 +485,122 @@ export default function StudentSelectionPage({ params }: { params: Promise<{ id:
                 </button>
               </div>
 
-              <p className="text-xs text-slate-600">
-                Chọn một bạn sinh viên trong danh sách chưa có nhóm để kéo thẳng vào nhóm của bạn:
-              </p>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Chọn Sinh Viên Chưa Có Nhóm ({unassignedStudentsList.length} bạn lẻ)
-                </label>
-                <select
-                  value={selectedUnassignedMssv}
-                  onChange={(e) => setSelectedUnassignedMssv(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-emerald-500"
-                >
-                  <option value="">-- Chọn sinh viên --</option>
-                  {unassignedStudentsList.map((s) => (
-                    <option key={s.id} value={s.mssv}>
-                      {s.mssv} - {s.full_name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2">
+              {/* Toggle Chế độ: Gõ tìm kiếm vs Dán Text */}
+              <div className="flex rounded-xl bg-slate-100 p-1 text-xs">
                 <button
-                  onClick={() => setAddMemberTargetGroup(null)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100"
+                  type="button"
+                  onClick={() => setAddMemberTab('search')}
+                  className={`flex-1 py-2 rounded-lg font-bold transition flex items-center justify-center gap-1.5 ${
+                    addMemberTab === 'search' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-600'
+                  }`}
                 >
-                  Hủy
+                  <Search className="w-3.5 h-3.5" /> Gõ Tìm MSSV / Họ tên
                 </button>
                 <button
-                  onClick={handleAddMemberToMyGroup}
-                  disabled={actionLoading || !selectedUnassignedMssv}
-                  className="px-5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50"
+                  type="button"
+                  onClick={() => setAddMemberTab('paste')}
+                  className={`flex-1 py-2 rounded-lg font-bold transition flex items-center justify-center gap-1.5 ${
+                    addMemberTab === 'paste' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-600'
+                  }`}
                 >
-                  Thêm Vào Nhóm
+                  <ClipboardList className="w-3.5 h-3.5" /> Dán MSSV / Họ tên Hàng Loạt
                 </button>
               </div>
+
+              {/* MODE 1: Gõ Tìm kiếm MSSV / Họ tên */}
+              {addMemberTab === 'search' && (
+                <div className="space-y-3">
+                  <div className="relative">
+                    <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Gõ MSSV hoặc Họ tên để tìm nhanh..."
+                      value={addMemberSearchQuery}
+                      onChange={(e) => setAddMemberSearchQuery(e.target.value)}
+                      className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-emerald-500"
+                      autoFocus
+                    />
+                  </div>
+
+                  <div className="max-h-60 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100 bg-slate-50">
+                    {searchedUnassignedStudents.length === 0 ? (
+                      <p className="p-4 text-xs text-center text-slate-500">
+                        Không tìm thấy sinh viên lẻ nào khớp với từ khóa.
+                      </p>
+                    ) : (
+                      searchedUnassignedStudents.map((s) => (
+                        <div
+                          key={s.id}
+                          className="p-3 text-xs flex justify-between items-center hover:bg-emerald-50 transition"
+                        >
+                          <div>
+                            <span className="font-bold text-slate-800 block">{s.full_name}</span>
+                            <span className="font-mono text-[11px] text-slate-500">{s.mssv}</span>
+                          </div>
+                          <button
+                            onClick={() => handleAddMembersToMyGroup([s.mssv])}
+                            disabled={actionLoading}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3 py-1.5 rounded-lg shadow-sm transition disabled:opacity-50 flex items-center gap-1"
+                          >
+                            <UserPlus className="w-3.5 h-3.5" /> Thêm Vào Nhóm
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* MODE 2: Dán MSSV / Họ tên Hàng loạt */}
+              {addMemberTab === 'paste' && (
+                <div className="space-y-3">
+                  <p className="text-xs text-slate-500">
+                    Dán danh sách MSSV hoặc Họ tên (mỗi dòng 1 bạn hoặc tách bằng dấu phẩy). Tự động đối chiếu với các bạn chưa có nhóm:
+                  </p>
+                  <textarea
+                    rows={4}
+                    placeholder={`261A300575\nPhan Ngọc Mai Anh\n261A300451`}
+                    value={addMemberPasteText}
+                    onChange={(e) => setAddMemberPasteText(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs font-mono focus:ring-2 focus:ring-emerald-500"
+                  />
+
+                  {/* Nhận diện được */}
+                  {parsedPastedStudents.length > 0 && (
+                    <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs space-y-1">
+                      <p className="font-bold text-emerald-800 flex items-center gap-1">
+                        <Sparkles className="w-4 h-4 text-emerald-600" /> Nhận diện được {parsedPastedStudents.length} sinh viên lẻ:
+                      </p>
+                      <div className="max-h-28 overflow-y-auto space-y-1">
+                        {parsedPastedStudents.map((s) => (
+                          <div key={s.id} className="font-mono text-emerald-900 text-[11px] flex justify-between">
+                            <span>{s.full_name}</span>
+                            <span className="font-bold">{s.mssv}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button
+                      onClick={() => setAddMemberTargetGroup(null)}
+                      className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100"
+                    >
+                      Hủy
+                    </button>
+                    <button
+                      onClick={() =>
+                        handleAddMembersToMyGroup(parsedPastedStudents.map((s) => s.mssv))
+                      }
+                      disabled={actionLoading || parsedPastedStudents.length === 0}
+                      className="px-5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 flex items-center gap-1.5 shadow-sm"
+                    >
+                      <UserPlus className="w-3.5 h-3.5" /> Thêm Tất Cả ({parsedPastedStudents.length} SV) Vào Nhóm
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -618,12 +737,13 @@ export default function StudentSelectionPage({ params }: { params: Promise<{ id:
                     <div className="flex justify-between items-center">
                       <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Thành viên:</p>
 
-                      {/* Nút Thêm người chưa có nhóm dành cho Thành viên / Nhóm trưởng */}
+                      {/* Nút Thêm người chưa có nhóm */}
                       {isMyGroup && !isFull && campaign.status === 'OPEN' && unassignedStudentsList.length > 0 && (
                         <button
                           onClick={() => {
                             setAddMemberTargetGroup(group.id);
-                            setSelectedUnassignedMssv('');
+                            setAddMemberSearchQuery('');
+                            setAddMemberPasteText('');
                           }}
                           className="text-[11px] font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2 py-1 rounded-lg transition inline-flex items-center gap-1"
                         >
@@ -704,7 +824,6 @@ export default function StudentSelectionPage({ params }: { params: Promise<{ id:
         {activeTab === 'master-list' && (
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden space-y-4 p-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-              {/* Filter */}
               <div className="flex gap-2 text-xs">
                 <button
                   onClick={() => setMasterListFilter('all')}
@@ -738,7 +857,6 @@ export default function StudentSelectionPage({ params }: { params: Promise<{ id:
                 </button>
               </div>
 
-              {/* Search */}
               <div className="relative w-full sm:w-64">
                 <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
                 <input
@@ -751,7 +869,6 @@ export default function StudentSelectionPage({ params }: { params: Promise<{ id:
               </div>
             </div>
 
-            {/* Table */}
             <div className="overflow-x-auto border border-slate-200 rounded-xl">
               <table className="w-full text-left border-collapse">
                 <thead>

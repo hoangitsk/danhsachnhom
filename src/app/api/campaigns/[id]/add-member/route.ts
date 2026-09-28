@@ -8,12 +8,25 @@ export async function POST(
   try {
     const { id: campaignId } = await params;
     const body = await request.json();
-    const { targetMssv, targetGroupId } = body;
+    const { targetMssv, mssvList, targetGroupId } = body;
 
-    if (!targetMssv || !targetGroupId) {
-      return NextResponse.json({ error: 'Thiếu thông tin sinh viên hoặc nhóm' }, { status: 400 });
+    if (!targetGroupId) {
+      return NextResponse.json({ error: 'Thiếu thông tin nhóm đích' }, { status: 400 });
     }
 
+    // Tổng hợp danh sách MSSV cần thêm
+    const targetMssvs: string[] = [];
+    if (Array.isArray(mssvList) && mssvList.length > 0) {
+      targetMssvs.push(...mssvList.map((m) => String(m).trim()).filter(Boolean));
+    } else if (targetMssv && String(targetMssv).trim()) {
+      targetMssvs.push(String(targetMssv).trim());
+    }
+
+    if (targetMssvs.length === 0) {
+      return NextResponse.json({ error: 'Vui lòng chọn hoặc nhập ít nhất một MSSV' }, { status: 400 });
+    }
+
+    // 1. Kiểm tra Campaign
     const { data: campaign, error: campaignError } = await supabase
       .from('campaigns')
       .select('status, max_per_group')
@@ -28,8 +41,8 @@ export async function POST(
       return NextResponse.json({ error: 'Đợt chọn nhóm đã khóa' }, { status: 400 });
     }
 
-    // Kiểm tra nhóm đích xem đã đầy chưa
-    const { data: groupMembers, error: groupMembersError } = await supabase
+    // 2. Kiểm tra sĩ số nhóm đích hiện tại
+    const { data: currentMembers, error: groupMembersError } = await supabase
       .from('students')
       .select('id')
       .eq('group_id', targetGroupId);
@@ -38,40 +51,57 @@ export async function POST(
       return NextResponse.json({ error: 'Lỗi khi kiểm tra sĩ số nhóm' }, { status: 500 });
     }
 
-    if (groupMembers.length >= campaign.max_per_group) {
-      return NextResponse.json({ error: 'Nhóm này đã đầy đủ thành viên' }, { status: 400 });
+    const availableSlots = campaign.max_per_group - currentMembers.length;
+    if (availableSlots <= 0) {
+      return NextResponse.json({ error: 'Nhóm này đã đầy đủ thành viên!' }, { status: 400 });
     }
 
-    // Tìm sinh viên cần thêm
-    const { data: student, error: studentError } = await supabase
+    if (targetMssvs.length > availableSlots) {
+      return NextResponse.json(
+        { error: `Nhóm chỉ còn ${availableSlots} slot trống, không thể thêm ${targetMssvs.length} sinh viên.` },
+        { status: 400 }
+      );
+    }
+
+    // 3. Tìm các sinh viên theo danh sách MSSV
+    const { data: foundStudents, error: studentError } = await supabase
       .from('students')
-      .select('id, group_id')
+      .select('id, mssv, full_name, group_id')
       .eq('campaign_id', campaignId)
-      .eq('mssv', targetMssv)
-      .single();
+      .in('mssv', targetMssvs);
 
-    if (studentError || !student) {
-      return NextResponse.json({ error: 'Không tìm thấy sinh viên trong danh sách' }, { status: 404 });
+    if (studentError || !foundStudents || foundStudents.length === 0) {
+      return NextResponse.json({ error: 'Không tìm thấy sinh viên khớp với các MSSV đã nhập' }, { status: 404 });
     }
 
-    if (student.group_id) {
-      return NextResponse.json({ error: 'Sinh viên này đã có nhóm khác rồi!' }, { status: 400 });
+    const alreadyAssigned = foundStudents.filter((s) => s.group_id);
+    if (alreadyAssigned.length > 0) {
+      const names = alreadyAssigned.map((s) => `${s.mssv} (${s.full_name})`).join(', ');
+      return NextResponse.json(
+        { error: `Sinh viên sau đây đã có nhóm khác rồi: ${names}` },
+        { status: 400 }
+      );
     }
 
-    // Đưa sinh viên vào nhóm
+    // 4. Cập nhật group_id cho danh sách sinh viên tìm thấy
+    const studentIdsToUpdate = foundStudents.map((s) => s.id);
     const { error: updateError } = await supabase
       .from('students')
       .update({
         group_id: targetGroupId,
         joined_at: new Date().toISOString(),
       })
-      .eq('id', student.id);
+      .in('id', studentIdsToUpdate);
 
     if (updateError) {
       return NextResponse.json({ error: 'Lỗi khi thêm sinh viên vào nhóm' }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({
+      success: true,
+      addedCount: foundStudents.length,
+      addedStudents: foundStudents.map((s) => s.full_name),
+    });
   } catch (err: unknown) {
     console.error('Error adding member to group:', err);
     return NextResponse.json({ error: 'Lỗi máy chủ' }, { status: 500 });
