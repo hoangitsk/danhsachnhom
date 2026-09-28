@@ -9,27 +9,31 @@ export interface ParsedStudent {
 /**
  * Chuẩn hóa chuỗi ngày sinh thành dạng DDMMYYYY (VD: 01/10/2008 -> 01102008).
  */
-export function formatDob(dobRaw: string | number | undefined | null): string {
+export function formatDob(dobRaw: string | number | Date | undefined | null): string {
   if (!dobRaw) return '';
+
+  if (dobRaw instanceof Date) {
+    const d = String(dobRaw.getDate()).padStart(2, '0');
+    const m = String(dobRaw.getMonth() + 1).padStart(2, '0');
+    const y = dobRaw.getFullYear();
+    return `${d}${m}${y}`;
+  }
+
   const str = String(dobRaw).trim();
   if (!str) return '';
 
-  // Xóa ký tự không phải số
   const cleanDigits = str.replace(/\D/g, '');
 
-  // Nếu là dạng 8 chữ số thuần (VD: 01102008)
   if (cleanDigits.length === 8) {
     return cleanDigits;
   }
 
-  // Nếu chứa dấu gạch đứng/nghiêng/chấm: 01/10/2008 hoặc 1/10/2008
   const parts = str.split(/[/.\-\s]+/);
   if (parts.length === 3) {
     let day = parts[0].padStart(2, '0');
     let month = parts[1].padStart(2, '0');
     let year = parts[2];
 
-    // Trường hợp năm viết trước (YYYY-MM-DD)
     if (parts[0].length === 4) {
       year = parts[0];
       month = parts[1].padStart(2, '0');
@@ -48,6 +52,7 @@ export function formatDob(dobRaw: string | number | undefined | null): string {
 
 /**
  * Phân tích file Excel / CSV (.xlsx, .xls, .csv) tải lên.
+ * Hỗ trợ tách cột [Họ lót] + [Tên] ghép thành [Họ và Tên].
  */
 export function parseExcelFile(arrayBuffer: ArrayBuffer): ParsedStudent[] {
   const workbook = XLSX.read(arrayBuffer, { type: 'array', cellDates: true });
@@ -60,34 +65,83 @@ export function parseExcelFile(arrayBuffer: ArrayBuffer): ParsedStudent[] {
 
   for (const row of jsonData) {
     let mssv = '';
-    let fullName = '';
-    let dobRaw = '';
+    let hoLot = '';
+    let ten = '';
+    let fullNameDirect = '';
+    let dobRaw: string | Date = '';
 
-    // Tìm các cột tương ứng
     for (const [key, value] of Object.entries(row)) {
-      const keyLower = key.toLowerCase();
+      const keyLower = key.toLowerCase().trim();
       const valStr = String(value).trim();
-
       if (!valStr) continue;
 
-      if (keyLower.includes('mssv') || keyLower.includes('mã') || keyLower.includes('sv') || keyLower.includes('student')) {
-        const mssvMatch = valStr.match(/\d{6,12}/);
-        if (mssvMatch) mssv = mssvMatch[0];
-      } else if (keyLower.includes('tên') || keyLower.includes('họ') || keyLower.includes('name')) {
-        fullName = valStr;
-      } else if (keyLower.includes('ngày sinh') || keyLower.includes('ns') || keyLower.includes('dob') || keyLower.includes('birth')) {
-        dobRaw = valStr;
+      // 1. Tim cột MSSV (Hỗ trợ cả chuỗi như 261A300575 hoặc 210444)
+      if (
+        keyLower.includes('mã sv') ||
+        keyLower.includes('mã sinh viên') ||
+        keyLower.includes('mã số') ||
+        keyLower.includes('mssv') ||
+        keyLower === 'mã' ||
+        keyLower.includes('student id')
+      ) {
+        mssv = valStr;
+      }
+      // 2. Tìm cột Họ lót / Họ và đệm
+      else if (
+        keyLower.includes('họ lót') ||
+        keyLower.includes('họ và tên lót') ||
+        keyLower.includes('họ và đệm') ||
+        keyLower === 'họ' ||
+        keyLower.includes('ho lot')
+      ) {
+        hoLot = valStr;
+      }
+      // 3. Tìm cột Tên
+      else if (keyLower === 'tên' || keyLower === 'ten' || keyLower.includes('first name')) {
+        ten = valStr;
+      }
+      // 4. Tìm cột Họ và tên đầy đủ
+      else if (
+        keyLower.includes('họ và tên') ||
+        keyLower.includes('họ tên') ||
+        keyLower.includes('ho va ten') ||
+        keyLower.includes('full name')
+      ) {
+        fullNameDirect = valStr;
+      }
+      // 5. Tìm cột Ngày sinh
+      else if (
+        keyLower.includes('ngày sinh') ||
+        keyLower.includes('ngaysinh') ||
+        keyLower.includes('dob') ||
+        keyLower === 'ns'
+      ) {
+        if (value instanceof Date) {
+          dobRaw = value;
+        } else {
+          dobRaw = valStr;
+        }
       }
     }
 
-    // Nếu không khớp theo header, quét theo kiểu dữ liệu từng cột
-    if (!mssv || !fullName) {
+    // Ghép [Họ lót] + [Tên] nếu Excel tách làm 2 cột
+    let finalFullName = '';
+    if (hoLot && ten) {
+      finalFullName = `${hoLot} ${ten}`.replace(/\s+/g, ' ').trim();
+    } else if (fullNameDirect) {
+      finalFullName = fullNameDirect.trim();
+    } else if (hoLot || ten) {
+      finalFullName = (hoLot || ten).trim();
+    }
+
+    // Fallback nếu không khớp tên cột Header
+    if (!mssv || !finalFullName) {
       const values = Object.values(row).map((v) => String(v).trim()).filter(Boolean);
       for (const val of values) {
-        if (!mssv && /^\d{6,12}$/.test(val)) {
+        if (!mssv && /^[a-zA-Z0-9]{5,15}$/.test(val) && /\d/.test(val)) {
           mssv = val;
-        } else if (!fullName && /[a-zA-ZÀ-ỹ]/.test(val) && val.length > 2) {
-          fullName = val;
+        } else if (!finalFullName && /[a-zA-ZÀ-ỹ]/.test(val) && val.length > 2) {
+          finalFullName = val;
         } else if (!dobRaw && (/\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2,4}/.test(val) || /^\d{8}$/.test(val))) {
           dobRaw = val;
         }
@@ -98,7 +152,7 @@ export function parseExcelFile(arrayBuffer: ArrayBuffer): ParsedStudent[] {
       seenMssv.add(mssv);
       results.push({
         mssv,
-        fullName: fullName || `Sinh viên ${mssv}`,
+        fullName: finalFullName || `Sinh viên ${mssv}`,
         dob: formatDob(dobRaw),
       });
     }
@@ -121,7 +175,7 @@ export function parseStudentListText(rawText: string): ParsedStudent[] {
     const trimmed = line.trim();
     if (!trimmed) continue;
 
-    const mssvMatch = trimmed.match(/\b\d{6,12}\b/);
+    const mssvMatch = trimmed.match(/\b[a-zA-Z0-9]{5,15}\b/);
 
     if (mssvMatch) {
       const mssv = mssvMatch[0];
@@ -129,7 +183,6 @@ export function parseStudentListText(rawText: string): ParsedStudent[] {
 
       let remaining = trimmed.replace(mssv, '').trim();
 
-      // Tìm ngày sinh trong chuỗi nếu có
       let dobRaw = '';
       const dobMatch = remaining.match(/\b\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2,4}\b/) || remaining.match(/\b\d{8}\b/);
       if (dobMatch) {
@@ -148,22 +201,6 @@ export function parseStudentListText(rawText: string): ParsedStudent[] {
         fullName,
         dob: formatDob(dobRaw),
       });
-    } else {
-      const parts = trimmed.split(/[\t,–-]/).map((p) => p.trim()).filter(Boolean);
-      if (parts.length >= 2) {
-        const p1IsMssv = /^\d+$/.test(parts[0]);
-        const mssv = p1IsMssv ? parts[0] : parts[parts.length - 1];
-        const fullName = p1IsMssv ? parts.slice(1).join(' ') : parts.slice(0, -1).join(' ');
-
-        if (mssv && !seenMssv.has(mssv)) {
-          seenMssv.add(mssv);
-          results.push({
-            mssv,
-            fullName,
-            dob: '',
-          });
-        }
-      }
     }
   }
 
